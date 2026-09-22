@@ -5795,6 +5795,7 @@ function newGame() {
     getItemRank: 0,
     battleSpeed: 1,
     autoSave: 1,
+    skipDrops: 1,   // 战斗胜利后跳过战利品选择，直接回迷宫继续探索
     mazeCp: { valid: false, map: 0, floor: 0 },
     notices: []     // UI 提示队列
   };
@@ -6371,11 +6372,11 @@ Battle.prototype.calBuffTime = function (pm, no) {
   if (pm === 0) this.actualChr(no); else this.actualMon(no);
 };
 
-/* 回合结束 HP 回复（checkTurnRegene） */
+/* 回合结束 HP 回复（checkTurnRegene + 修复：新月再生的回复buff在原作中未被消费，这里补上） */
 Battle.prototype.turnRegene = function (ev) {
   for (var i = 0; i < 4; i++) {
     var c = G.chrs[i];
-    var rest = c.st[24];
+    var rest = c.st[24] + (this.cbuff[i][12][0] > 0 ? this.cbuff[i][12][1] : 0);
     if (c.hp > 0 && rest > 0) {
       if (c.hp + rest > c.st[31]) rest = c.st[31] - c.hp;
       if (rest > 0) {
@@ -7181,6 +7182,7 @@ function serialize() {
 function deserialize(str) {
   var o = JSON.parse(str);
   G = o.G;
+  if (G.skipDrops === undefined) G.skipDrops = 1;
   for (var i = 0; i < 4; i++) calChrStatus(i);
   return G;
 }
@@ -7546,6 +7548,10 @@ function finishBattle() {
     ui.drops = Game.makeDrops(b);
     ui.dropBattle = { boss: b.boss, colosseum: b.colosseum, getExp: b.getExp, getGold: b.getGold };
     battle = null;
+    if (Game.G.skipDrops && !ui.dropBattle.boss && (ui.dropBattle.colosseum === null || ui.dropBattle.colosseum === undefined)) {
+      confirmDrops();
+      return;
+    }
     go('drops');
   } else if (b.state === 'lose') {
     var G = Game.G;
@@ -7581,10 +7587,9 @@ function vDrops() {
 }
 function confirmDrops() {
   var db = ui.dropBattle;
-  var ups = Game.applyBattleRewards({ getExp: db.getExp, getGold: db.getGold });
+  Game.applyBattleRewards({ getExp: db.getExp, getGold: db.getGold });
   Game.takeDrops(ui.drops);
   var msg = '';
-  for (var i = 0; i < ups.length; i++) msg += Game.G.chrs[ups[i].chr].name + ' 升级！Lv' + ups[i].lv + '（职业Lv' + ups[i].clv + '）\n';
   if (db.colosseum !== null && db.colosseum !== undefined) {
     var unlock = Game.colosseumClear(db.colosseum);
     if (unlock) msg += '竞技场新级别解锁！';
@@ -7920,6 +7925,7 @@ function vSettings() {
   html += '<div class="setRow">取得装备品质 <button id="btnRankDown">－</button> <b>' + Game.RANK_NAME[G.getItemRank] + '</b> <button id="btnRankUp">＋</button><div class="dim small">低于该品质的掉落装备自动标记为「丢」</div></div>';
   html += '<div class="setRow">战斗速度 <button id="btnSpeedSet">x' + G.battleSpeed + '</button></div>';
   html += '<div class="setRow">自动保存（进迷宫时） <button id="btnAutoSave">' + (G.autoSave ? '开' : '关') + '</button></div>';
+  html += '<div class="setRow">跳过战利品选择 <button id="btnSkipDrops">' + (G.skipDrops ? '开' : '关') + '</button><div class="dim small">战斗胜利后自动收取「拾」的掉落并回到迷宫继续探索</div></div>';
   html += '<div class="setRow"><button class="big" id="btnSave">保存存档</button></div>';
   html += '<div class="setRow"><button class="big danger" id="btnReset">删除存档并重置</button></div>';
   html += '</div>';
@@ -8135,6 +8141,7 @@ function bind() {
   on('btnRankDown', function () { if (Game.G.getItemRank > 0) Game.G.getItemRank--; render(); });
   on('btnSpeedSet', function () { Game.G.battleSpeed = Game.G.battleSpeed >= 4 ? 1 : Game.G.battleSpeed * 2; render(); });
   on('btnAutoSave', function () { Game.G.autoSave = 1 - Game.G.autoSave; render(); });
+  on('btnSkipDrops', function () { Game.G.skipDrops = 1 - Game.G.skipDrops; render(); });
 }
 
 /* ---------- 启动 ---------- */

@@ -63,7 +63,7 @@ button.danger { background: #4a2020; border-color: #8a3a3a; }
 .monCell.dead { opacity: 0.15; filter: grayscale(1); }
 .monName { font-size: 11px; margin-bottom: 4px; }
 .monimg { max-width: 130px; }
-.battleLog { height: 64px; overflow: hidden; border: 1px solid #2e2e44; background: #101018;
+.battleLog { height: 136px; overflow-y: auto; border: 1px solid #2e2e44; background: #101018;
   border-radius: 4px; padding: 4px 8px; margin: 6px 0; font-size: 12px; line-height: 16px; }
 .battleParty { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .bChr { position: relative; display: flex; gap: 4px; background: #1b1b28; border: 1px solid #2e2e44;
@@ -7101,6 +7101,21 @@ function equipItem(chrNo, part, itemIdx) {
   if (c.mp > c.st[32]) c.mp = c.st[32];
   return null;
 }
+/* 装备预览：模拟穿上 itemIdx 后的面板变化（含双手武器联动），不产生实际改动 */
+function previewEquipDiff(chrNo, part, itemIdx) {
+  var c = G.chrs[chrNo];
+  var before = c.st;
+  var e0 = c.equip[0], e1 = c.equip[1], ep = c.equip[part];
+  var t = G.items[itemIdx].d[3];
+  c.equip[part] = itemIdx;
+  if (part === 1 && e0 >= 0) { var t0 = G.items[e0].d[3]; if (t0 >= 6 && t0 <= 10) c.equip[0] = -1; }
+  if (part === 0 && t >= 6 && t <= 10) c.equip[1] = -1;
+  calChrStatus(chrNo);
+  var after = c.st;
+  c.equip[0] = e0; c.equip[1] = e1; c.equip[part] = ep;
+  calChrStatus(chrNo);
+  return { before: before, after: after };
+}
 function unequipItem(chrNo, part) {
   var c = G.chrs[chrNo];
   var old = c.equip[part];
@@ -7227,6 +7242,7 @@ var API = {
   stoneMix: stoneMix,
   canEquip: canEquip,
   equipItem: equipItem,
+  previewEquipDiff: previewEquipDiff,
   unequipItem: unequipItem,
   canChangeClass: canChangeClass,
   changeClass: changeClass,
@@ -7312,6 +7328,41 @@ function rankSpan(item) {
   return '<span style="color:' + Game.RANK_COLOR[r] + '">' + esc(nm) + '</span>';
 }
 function rankTag(r) { return '<span class="ranktag" style="color:' + Game.RANK_COLOR[r] + '">[' + Game.RANK_NAME[r] + ']</span>'; }
+function diffNum(d) {
+  if (!d) return '';
+  return '<span style="color:' + (d > 0 ? '#7ac74f' : '#ff6a6a') + '">' + (d > 0 ? '+' : '') + d + '</span>';
+}
+var DIFF_FIELDS = [
+  [11, '腕力', ''], [12, '敏捷', ''], [13, '智力', ''], [14, '体力', ''],
+  [7, '炎攻', '%'], [8, '冰攻', '%'], [9, '雷攻', '%'], [10, '风攻', '%'],
+  [17, '炎抗', ''], [18, '冰抗', ''], [19, '雷抗', ''], [20, '风抗', ''],
+  [22, '探索HP回复', ''], [23, '探索MP回复', ''], [24, '战斗HP回复', ''],
+  [25, 'HP吸收', '%'], [26, 'MP吸收', '%'], [28, 'MP消耗-', '%'], [29, '特殊伤害-', '%'],
+  [30, '探索速度', ''], [36, '闪避', '%'], [37, '无属性伤害-', '%'], [38, '属性伤害-', '%']
+];
+function equipDiffHtml(chr, part, idx) {
+  var pv = Game.previewEquipDiff(chr, part, idx);
+  var b = pv.before, a = pv.after;
+  var d1 = diffNum(a[33] - b[33]), d2 = diffNum(a[34] - b[34]);
+  var parts = [];
+  if (d1 || d2) parts.push('攻击 ' + (d1 || '±0') + '~' + (d2 || '±0'));
+  if (a[35] !== b[35]) parts.push('防御 ' + diffNum(a[35] - b[35]));
+  if (a[31] !== b[31]) parts.push('HP ' + diffNum(a[31] - b[31]));
+  if (a[32] !== b[32]) parts.push('MP ' + diffNum(a[32] - b[32]));
+  if (a[27] !== b[27]) parts.push('暴击 ' + diffNum(a[27] - b[27]) + '%');
+  var parts2 = [];
+  for (var i = 0; i < DIFF_FIELDS.length; i++) {
+    var f = DIFF_FIELDS[i], dd = a[f[0]] - b[f[0]];
+    if (dd) parts2.push(f[1] + ' ' + diffNum(dd) + f[2]);
+  }
+  var out = '对比: ';
+  if (!parts.length && !parts2.length) out += '<span class="dim">数值无变化</span>';
+  else {
+    if (parts.length) out += parts.join(' ');
+    if (parts2.length) out += (parts.length ? '<br>' : '') + parts2.join(' ');
+  }
+  return out;
+}
 function bar(cur, max, cls) {
   var p = max > 0 ? Math.max(0, Math.min(100, cur * 100 / max)) : 0;
   return '<div class="barWrap"><div class="bar ' + cls + '"><div class="barin" style="width:' + p + '%"></div></div><span>' + cur + '/' + max + '</span></div>';
@@ -7451,7 +7502,7 @@ function startMazeTimer() {
     if (res.floorUp && msg) msg.textContent = '进入第 ' + (mz.floor + 1) + ' 层';
     if (res.battle) {
       clearInterval(mazeTimer); mazeTimer = null;
-      startBattle({ boss: res.boss === 'boss' });
+      startBattle({ boss: res.battle === 'boss' });
     }
   }, 110);
 }
@@ -7495,7 +7546,8 @@ function battlePartyHtml() {
   for (var i = 0; i < 4; i++) {
     var c = G.chrs[i];
     out += '<div class="bChr' + (c.hp <= 0 ? ' dead' : '') + '" id="bchr' + i + '">' + faceDiv(c.face, 34) +
-      '<div class="miniInfo"><div class="miniName">' + esc(c.name) + '</div>' +
+      '<div class="miniInfo"><div class="miniName">' + esc(c.name) + ' <span class="dim">Lv' + c.lv +
+      ' ' + DATA.className[c.cls] + ' Lv' + c.classLv[c.cls] + '</span></div>' +
       bar(c.hp, c.st[31], 'hp') + bar(c.mp, c.st[32], 'mp') + '</div></div>';
   }
   return out;
@@ -7505,7 +7557,7 @@ function vBattle() {
     '<span><button id="btnSpeed">速度x' + Game.G.battleSpeed + '</button>' +
     (battle.boss ? '' : '<button id="btnEscape">逃跑</button>') + '</span></div>';
   html += '<div class="battleField">' + monsHtml() + '</div>';
-  html += '<div class="battleLog" id="battleLog">' + battleLog.slice(-4).map(esc).join('<br>') + '</div>';
+  html += '<div class="battleLog" id="battleLog">' + battleLog.slice(-10).map(esc).join('<br>') + '</div>';
   html += '<div class="battleParty" id="battleParty">' + battlePartyHtml() + '</div>';
   return html;
 }
@@ -7515,7 +7567,7 @@ function refreshBattleDom() {
   var bp = document.getElementById('battleParty');
   if (bp) bp.innerHTML = battlePartyHtml();
   var bl = document.getElementById('battleLog');
-  if (bl) { bl.innerHTML = battleLog.slice(-4).map(esc).join('<br>'); bl.scrollTop = 9999; }
+  if (bl) { bl.innerHTML = battleLog.slice(-10).map(esc).join('<br>'); bl.scrollTop = 9999; }
 }
 function floatAt(elemId, txt, cls) {
   var el = document.getElementById(elemId);
@@ -7526,6 +7578,11 @@ function floatAt(elemId, txt, cls) {
   el.appendChild(f);
   setTimeout(function () { if (f.parentNode) f.parentNode.removeChild(f); }, 900);
 }
+var ATTR_NAMES = ['', '炎', '冰', '雷', '风'];
+function batMonName(i) {
+  var m = battle.mons[i];
+  return (Game.MON_TYPE_NAME[m.type] ? Game.MON_TYPE_NAME[m.type] : '') + DATA.monsters[m.no].name;
+}
 function applyBattleEvents(evs) {
   for (var i = 0; i < evs.length; i++) {
     var e = evs[i];
@@ -7533,10 +7590,20 @@ function applyBattleEvents(evs) {
     else if (e.t === 'skill') bLog(e.txt);
     else if (e.t === 'hit') {
       floatAt(e.side === 1 ? 'mon' + e.idx : 'bchr' + e.idx, (e.crit ? '暴击 ' : '') + e.val, e.side === 1 ? 'fdmg' : 'fhurt');
+      var attr = e.attr ? '（' + ATTR_NAMES[e.attr] + '属性）' : '';
+      if (e.side === 1) {
+        bLog('对' + batMonName(e.idx) + '造成 ' + e.val + ' 点伤害' + attr + (e.crit ? '（暴击）' : '') + (e.die ? '，击倒了！' : ''));
+      } else {
+        bLog(Game.G.chrs[e.idx].name + '受到 ' + e.val + ' 点伤害' + attr + (e.crit ? '（暴击）' : '') + (e.die ? '，倒下了！' : ''));
+      }
     } else if (e.t === 'heal') {
       floatAt(e.side === 1 ? 'mon' + e.idx : 'bchr' + e.idx, '+' + e.val, 'fheal');
+      if (e.val > 0) bLog((e.side === 1 ? batMonName(e.idx) : Game.G.chrs[e.idx].name) + '回复了 ' + e.val + ' 点HP');
     } else if (e.t === 'mp') {
-      if (e.val !== 0) floatAt('bchr' + e.idx, (e.val > 0 ? '+' : '') + e.val + 'MP', 'fmp');
+      if (e.val !== 0) {
+        floatAt('bchr' + e.idx, (e.val > 0 ? '+' : '') + e.val + 'MP', 'fmp');
+        bLog(Game.G.chrs[e.idx].name + '的MP ' + (e.val > 0 ? '回复了 ' + e.val : '消耗了 ' + (-e.val)));
+      }
     }
   }
   refreshBattleDom();
@@ -7558,6 +7625,7 @@ function finishBattle() {
     G.gold = Game.idiv(G.gold, 2);
     for (var i = 0; i < 4; i++) G.chrs[i].hp = 1;
     battle = null;
+    if (Game.G.autoSave) saveGame(true);
     go('town');
     notify('全灭了……金钱减半，被送回了街道');
   } else if (b.state === 'escape') {
@@ -7631,6 +7699,11 @@ function vEquip() {
     var p2 = ui.part;
     html += '<div class="subHead">' + Game.PART_NAME[p2] + ' — 选择装备 <button id="btnPartBack">返回</button>' +
       (partItem(chr, p2) ? '<button id="btnUnequip">卸下</button>' : '') + '</div>';
+    var curIt = partItem(chr, p2);
+    html += '<div class="setRow"><span class="dim">当前装备：</span>' +
+      (curIt ? itemIcon(curIt) + rankSpan(curIt) + ' <span class="dim">Lv' + curIt.d[4] + '</span>' +
+        '<br><span class="dim small">' + esc(itemBrief(curIt)) + '</span>'
+        : '<span class="dim">（空）</span>') + '</div>';
     html += '<div class="list">';
     var types = partTypes(p2);
     var found = 0;
@@ -7642,7 +7715,8 @@ function vEquip() {
       found++;
       html += '<button class="listBtn" data-equipitem="' + i + '">' + itemIcon(it2) + rankSpan(it2) +
         ' <span class="dim">Lv' + it2.d[4] + (G.chrs[chr].lv < it2.d[4] ? ' 等级不足' : '') + '</span>' +
-        '<br><span class="dim small">' + esc(itemBrief(it2)) + '</span></button>';
+        '<br><span class="dim small">' + esc(itemBrief(it2)) + '</span>' +
+        '<br><span class="small">' + equipDiffHtml(chr, p2, i) + '</span></button>';
     }
     if (!found) html += '<div class="dim" style="padding:12px">没有可装备物品</div>';
     html += '</div>';
@@ -7737,7 +7811,11 @@ function vClass() {
     var info = 'Lv' + c.classLv[i] + (G.books[i] > 0 ? ' 书x' + G.books[i] : '');
     html += '<button class="listBtn" data-class="' + i + '"' + (can && c.cls !== i ? '' : ' disabled') + '>' +
       DATA.className[i] + cur + ' <span class="dim">' + info + '</span>' +
-      '<br><span class="dim small">技能：' + DATA.skillName[i][0] + ' / ' + DATA.skillName[i][1] + '</span></button>';
+      '<br><span class="dim small">技能：' + DATA.skillName[i][0] + ' / ' + DATA.skillName[i][1] + '</span>' +
+      '<br><span class="dim small">成长值（每职业等级）腕力+' + DATA.classGrowth[0][i] +
+      ' 敏捷+' + DATA.classGrowth[1][i] + ' 智力+' + DATA.classGrowth[2][i] + ' 体力+' + DATA.classGrowth[3][i] +
+      '　攻击影响 ' + DATA.classGrowth[4][i] + '/' + DATA.classGrowth[5][i] + '/' + DATA.classGrowth[6][i] + '%' +
+      '　防御影响 ' + DATA.classGrowth[7][i] + '/' + DATA.classGrowth[8][i] + '/' + DATA.classGrowth[9][i] + '%</span></button>';
   }
   html += '</div>';
   return html;
@@ -7924,7 +8002,7 @@ function vSettings() {
   var html = '<div class="townHead"><span>设定</span><button id="btnBack">返回</button></div><div class="list">';
   html += '<div class="setRow">取得装备品质 <button id="btnRankDown">－</button> <b>' + Game.RANK_NAME[G.getItemRank] + '</b> <button id="btnRankUp">＋</button><div class="dim small">低于该品质的掉落装备自动标记为「丢」</div></div>';
   html += '<div class="setRow">战斗速度 <button id="btnSpeedSet">x' + G.battleSpeed + '</button></div>';
-  html += '<div class="setRow">自动保存（进迷宫时） <button id="btnAutoSave">' + (G.autoSave ? '开' : '关') + '</button></div>';
+  html += '<div class="setRow">自动保存（从迷宫返回街道时） <button id="btnAutoSave">' + (G.autoSave ? '开' : '关') + '</button></div>';
   html += '<div class="setRow">跳过战利品选择 <button id="btnSkipDrops">' + (G.skipDrops ? '开' : '关') + '</button><div class="dim small">战斗胜利后自动收取「拾」的掉落并回到迷宫继续探索</div></div>';
   html += '<div class="setRow"><button class="big" id="btnSave">保存存档</button></div>';
   html += '<div class="setRow"><button class="big danger" id="btnReset">删除存档并重置</button></div>';
@@ -7936,9 +8014,13 @@ function vSettings() {
 function bind() {
   function on(id, fn) { var el = document.getElementById(id); if (el) el.onclick = fn; }
   on('btnNew', function () {
-    Game.newGame();
-    notify('欢迎来到养成所。探索迷宫、打倒怪物、收集装备吧！');
-    go('town');
+    var start = function () {
+      Game.newGame();
+      notify('欢迎来到养成所。探索迷宫、打倒怪物、收集装备吧！');
+      go('town');
+    };
+    if (hasSave()) askConfirm('已有存档，从头开始将覆盖当前进度，确定吗？', start);
+    else start();
   });
   on('btnContinue', function () {
     try {
@@ -7970,18 +8052,17 @@ function bind() {
     b.onclick = function () {
       var no = parseInt(b.getAttribute('data-maze'), 10);
       Game.enterMaze(no, false);
-      if (Game.G.autoSave) saveGame(true);
       go('maze');
     };
   });
   on('btnCp', function () {
     Game.enterMaze(Game.G.mazeCp.map, true);
-    if (Game.G.autoSave) saveGame(true);
     go('maze');
   });
   on('btnRetreat', function () {
     askConfirm('撤退回街道吗？', function () {
       clearInterval(mazeTimer); mazeTimer = null;
+      if (Game.G.autoSave) saveGame(true);
       go('town');
     });
   });
@@ -8153,5 +8234,22 @@ window.startUI = function () {
 
 </script>
 <script>window.startUI();</script>
+<!--客服 开始-->
+<script src="//g8hh.github.io/static/js/jquery.min.js"></script>
+<link rel="stylesheet" href="//g8hh.github.io/static/css/kf.css" type="text/css" media="screen" charset="utf-8">
+<script src="//g8hh.github.io/static/js/kf.js"></script>
+<!-- 客服 结束 -->
+<!--站长统计-->
+   <div style="display: none">
+<script>
+var _hmt = _hmt || [];
+(function() {
+  var hm = document.createElement("script");
+  hm.src = "https://hm.baidu.com/hm.js?ec5f26b84bd0967de22ac0e5a0c177e1";
+  var s = document.getElementsByTagName("script")[0]; 
+  s.parentNode.insertBefore(hm, s);
+})();
+</script>
+    </div>
 </body>
 </html>
